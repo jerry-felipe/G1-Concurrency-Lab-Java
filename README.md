@@ -1,16 +1,28 @@
-<p align="center">
-  <img src="G1-Concurrency.png" alt="Java Concurrency in Production" width="100%">
-</p>
+# ¿Por qué la concurrencia puede hacer tu sistema más rápido… o destruirlo en producción?
 
-## ¿Por qué la concurrencia puede hacer tu sistema más rápido… o destruirlo en producción?
+**Concurrencia en Java: más velocidad o más caos, depende de cómo la diseñes**
 
-## Concurrencia en Java: más velocidad o más caos, depende de cómo la diseñes
-
-Este repositorio presenta un caso práctico sobre concurrencia en **Java 25 LTS**, enfocado en demostrar cómo la ejecución concurrente puede mejorar el rendimiento de un sistema, pero también puede provocar errores graves cuando el estado compartido no se controla correctamente.
+Este repositorio presenta un caso práctico sobre concurrencia en Java, enfocado en demostrar cómo la ejecución concurrente puede mejorar el rendimiento de un sistema, pero también puede provocar errores graves cuando el estado compartido no se controla correctamente.
 
 Dominar la concurrencia ya no es opcional para un desarrollador moderno. Los sistemas actuales procesan múltiples usuarios, transacciones, eventos y servicios al mismo tiempo. Cuando la concurrencia se diseña bien, permite mayor velocidad, escalabilidad y mejor uso de recursos. Cuando se ignora o se implementa mal, puede generar errores difíciles de detectar, datos inconsistentes, bloqueos, lentitud y fallos críticos en producción.
 
 El verdadero reto no es ejecutar varias tareas al mismo tiempo, sino hacerlo con control, sincronización y seguridad.
+
+---
+
+## Estructura del proyecto
+
+```
+src/main/java/com/workorderit/concurrency/
+├── model/
+│   └── Order.java                    # Modelo inmutable de una orden
+├── unsafe/
+│   └── UnsafeOrderProcessor.java     # Versión sin sincronización (race condition)
+├── safe/
+│   └── SafeOrderProcessor.java       # Versión segura con AtomicInteger + AtomicLong
+└── Main.java                         # Ejecuta ambas versiones y compara resultados
+pom.xml                               # Configuración Maven (Java 21 LTS)
+```
 
 ---
 
@@ -24,132 +36,102 @@ El repositorio también muestra cómo corregir este problema utilizando mecanism
 
 ## Tecnología principal
 
-- Lenguaje: Java
-- Versión recomendada: Java 25 LTS
-- Enfoque: Concurrencia, estado compartido, atomicidad y seguridad entre hilos
-- Tipo de proyecto: Ejemplo técnico y educativo para desarrolladores
+- **Lenguaje:** Java 21 LTS
+- **Enfoque:** Concurrencia, estado compartido, atomicidad y seguridad entre hilos
+- **Build:** Maven
+- **Tipo de proyecto:** Ejemplo técnico y educativo para desarrolladores
 
 ---
 
-## Problema que se analiza
+## El problema que se analiza
 
-El caso presentado simula un sistema que procesa múltiples órdenes de manera concurrente. La intención es reducir el tiempo total de procesamiento mediante la ejecución paralela.
+El sistema simula el procesamiento paralelo de 1.000 órdenes usando 20 hilos concurrentes. Cada orden actualiza dos valores compartidos:
 
-Sin embargo, el sistema actualiza un resumen compartido con dos valores críticos:
+- Cantidad de órdenes procesadas
+- Monto total acumulado
 
-- Cantidad de órdenes procesadas.
-- Monto total acumulado.
+### Versión insegura — `UnsafeOrderProcessor`
 
-El problema aparece cuando varios hilos intentan modificar esos valores al mismo tiempo sin ningún mecanismo de protección.
+Usa variables primitivas (`int`, `double`) sin ningún mecanismo de protección. Cuando varios hilos ejecutan `process()` al mismo tiempo, ocurre una **condición de carrera**:
 
-Aunque las operaciones parezcan simples, pueden producir resultados incorrectos porque no son seguras cuando varios hilos acceden simultáneamente al mismo estado.
+```
+Hilo A lee totalOrders = 5
+Hilo B lee totalOrders = 5   ← B no sabe que A ya lo leyó
+Hilo A escribe totalOrders = 6
+Hilo B escribe totalOrders = 6  ← el incremento de A se PIERDE
+```
 
----
+El sistema parece funcionar, pero los datos finales están dañados.
 
-## Riesgo principal
+### Versión segura — `SafeOrderProcessor`
 
-El sistema puede parecer rápido y aparentemente funcional, pero los resultados finales pueden estar dañados.
-
-Esto representa un riesgo real en producción porque una aplicación concurrente mal diseñada puede:
-
-- Registrar menos operaciones de las realmente procesadas.
-- Calcular montos incorrectos.
-- Generar inconsistencias de datos.
-- Producir errores difíciles de reproducir.
-- Afectar procesos críticos del negocio.
-- Crear una falsa sensación de rendimiento mientras compromete la confiabilidad.
+Usa `AtomicInteger` y `AtomicLong` de `java.util.concurrent.atomic`. Estas clases garantizan operaciones **CAS (Compare-And-Swap)** a nivel de hardware: cada incremento es atómico, sin bloqueos y sin riesgo de deadlock.
 
 ---
 
-## Conceptos clave que aborda el repositorio
+## Cómo ejecutarlo
 
-Este proyecto ayuda a comprender problemas esenciales de concurrencia, tales como:
+```bash
+git clone https://github.com/jerry-felipe/G1-Concurrency-Lab-Java.git
+cd G1-Concurrency-Lab-Java
+mvn package
+java -jar target/concurrency-lab.jar
+```
 
-- Condiciones de carrera.
-- Estado compartido.
-- Pérdida de actualizaciones.
-- Atomicidad.
-- Seguridad entre hilos.
-- Control de datos compartidos.
-- Procesamiento paralelo.
-- Confiabilidad en producción.
+### Salida esperada
 
----
+```
+============================================================
+  CONCURRENCY LAB - Work Order IT
+============================================================
+  Ordenes    : 1.000
+  Hilos      : 20
+  Total esp. : $150.750,00
 
-## Dónde suelen aparecer estos problemas
+============================================================
+  VERSION INSEGURA (sin sincronizacion)
+============================================================
+  Ordenes procesadas : 987 / 1.000  ERROR   ← pierde órdenes
+  Monto total        : $148.490,25 / $150.750,00  ERROR
+  Estado             : DATOS CORRUPTOS
 
-Los errores de concurrencia pueden aparecer en múltiples escenarios reales, incluyendo:
-
-- APIs con alto volumen de solicitudes.
-- Sistemas transaccionales.
-- Bases de datos.
-- Colas de mensajes.
-- Microservicios.
-- Procesos batch.
-- Cachés compartidas.
-- Sistemas distribuidos.
-- Servicios que procesan eventos en paralelo.
-
----
-
-## Enfoque de la solución
-
-La solución conserva el procesamiento concurrente, pero protege correctamente el estado compartido.
-
-En lugar de usar variables normales para acumular los resultados, se utilizan mecanismos atómicos de Java que permiten actualizar valores compartidos de forma segura cuando varios hilos intentan modificarlos al mismo tiempo.
-
-De esta forma, el sistema mantiene la ventaja de procesar órdenes en paralelo, pero evita que los resultados finales se corrompan.
+============================================================
+  VERSION SEGURA (AtomicInteger + AtomicLong)
+============================================================
+  Ordenes procesadas : 1.000 / 1.000  OK
+  Monto total        : $150.750,00 / $150.750,00  OK
+  Estado             : DATOS CORRECTOS
+```
 
 ---
 
-## Aprendizaje principal
+## Conceptos clave
 
-La concurrencia no se trata simplemente de lanzar más hilos.
+- **Condición de carrera** — múltiples hilos acceden al mismo estado sin coordinación
+- **Atomicidad** — una operación se completa sin interrupciones externas
+- **CAS (Compare-And-Swap)** — mecanismo hardware para actualizaciones seguras sin locks
+- **Lock-free programming** — concurrencia sin `synchronized`, más eficiente bajo alta carga
 
-Se trata de paralelizar sin perder control sobre los datos compartidos.
+---
 
-Una concurrencia bien diseñada puede acelerar el sistema.
+## Dónde aparecen estos problemas en producción
 
-Una concurrencia mal entendida puede volverlo impredecible.
+APIs con alto volumen de solicitudes, sistemas transaccionales, bases de datos, colas de mensajes, microservicios, procesos batch, cachés compartidas y sistemas distribuidos.
 
 ---
 
 ## Idea clave
 
-La concurrencia bien dominada acelera el sistema.
-
-La concurrencia mal diseñada puede destruir la confiabilidad de una aplicación en producción.
-
----
-
-## Público objetivo
-
-Este repositorio está dirigido a:
-
-- Desarrolladores Java.
-- Desarrolladores backend.
-- Arquitectos de software.
-- Equipos técnicos que trabajan con sistemas transaccionales.
-- Profesionales que desean comprender riesgos reales de concurrencia.
-- Estudiantes que desean aprender concurrencia desde un caso práctico.
-
----
-
-## Resultado esperado
-
-Al revisar este proyecto, el desarrollador podrá entender por qué un sistema concurrente puede ser más rápido, pero también más peligroso si no se controla correctamente el acceso al estado compartido.
-
-El objetivo no es solo demostrar un error técnico, sino reforzar una lección fundamental para producción:
-
-La velocidad sin control puede convertirse en inconsistencia.
+> La concurrencia bien dominada acelera el sistema.
+> La concurrencia mal diseñada puede destruir la confiabilidad de una aplicación en producción.
 
 ---
 
 ## Autor
 
-**Work Order IT**  
+**Work Order IT**
 Soluciones tecnológicas, arquitectura de software y formación técnica para equipos de desarrollo.
 
 Este proyecto forma parte de una iniciativa educativa orientada a explicar, de forma práctica, cómo la concurrencia en Java puede mejorar el rendimiento de un sistema o comprometer su confiabilidad si no se diseña correctamente.
 
-Website: [www.workorder-it.net](https://www.workorder-it.net)
+🌐 [www.workorder-it.net](https://www.workorder-it.net)
